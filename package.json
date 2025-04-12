@@ -1,0 +1,127 @@
+{
+  "name": "flutter-rapid-runner",
+  "displayName": "Flutter Rapid Runner",
+  "description": "VS Code extension that mimics Android Studio toolbar for Flutter",
+  "version": "0.1.3",
+  "publisher": "jashkumarsolanki",
+  "author": {
+    "name": "Jashkumar Bakul Solanki",
+    "email": "jashkumar.dev@gmail.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ClasherCr/flutter-rapid-runner"
+  },
+  "engines": {
+    "vscode": "^1.60.0"
+  },
+  "categories": [
+    "Other",
+    "Programming Languages",
+    "Debuggers"
+  ],
+  "keywords": [
+    "flutter",
+    "dart",
+    "run",
+    "debug",
+    "android studio"
+  ],
+  "activationEvents": [
+    "onCommand:flutter-rapid-runner.runWithOptions",
+    "onCommand:flutter-rapid-runner.run",
+    "onCommand:flutter-rapid-runner.debug",
+    "onCommand:flutter-rapid-runner.stop",
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Flutter Runner",
+      "properties": {
+        "flutterRunner.runIn": {
+          "type": "string",
+          "enum": [
+            "terminal",
+            "debugConsole"
+          ],
+          "default": "terminal",
+          "description": "Choose where to run Flutter (Terminal or Debug Console)"
+        },
+        "flutterRunner.runMode": {
+          "type": "string",
+          "enum": [
+            "run",
+            "debug",
+            "profile",
+            "release"
+          ],
+          "default": "run",
+          "description": "Mode to run the Flutter app"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "flutter-rapid-runner.run",
+        "title": "Flutter: Run",
+        "icon": "$(play)"
+      },
+      {
+        "command": "flutter-rapid-runner.runWithOptions",
+        "title": "Flutter: Run With Options",
+        "icon": "$(rocket)"
+      },
+      {
+        "command": "flutter-rapid-runner.debug",
+        "title": "Flutter: Debug",
+        "icon": "$(zap)"
+      },
+      {
+        "command": "flutter-rapid-runner.stop",
+        "title": "Flutter: Stop",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "flutter-rapid-runner.toggleRunLocation",
+        "title": "Flutter: Toggle Run Location (Terminal/Debug Console)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "flutter-rapid-runner.runWithOptions",
+          "group": "navigation",
+          "when": "resourceExtname == .dart && !flutterRunnerExtension.isRunning"
+        },
+        {
+          "command": "flutter-rapid-runner.stop",
+          "group": "navigation",
+          "when": "resourceExtname == .dart && flutterRunnerExtension.isRunning"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "flutter-rapid-runner.toggleRunLocation",
+          "when": "workspaceHasFlutterProject"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.60.0",
+    "@types/node": "^12.11.7",
+    "@typescript-eslint/eslint-plugin": "^4.14.1",
+    "@typescript-eslint/parser": "^4.14.1",
+    "eslint": "^7.19.0",
+    "typescript": "^4.1.3"
+  }
+}
