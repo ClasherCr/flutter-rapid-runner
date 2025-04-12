@@ -51,6 +51,16 @@ This extension contributes the following settings:
 * `flutterRunner.runIn`: Choose where to run Flutter (Terminal or Debug Console)
 * `flutterRunner.runMode`: Default mode to run Flutter app (run, debug, profile, release)
 
+## Terminal Color Behavior
+
+When running Flutter apps, VS Code normally changes the status bar to orange. This extension offers options to control this behavior:
+
+- **Default**: Keep VS Code's default behavior (status bar turns orange)
+- **Preserve**: Prevent the status bar from changing color when running Flutter
+- **Custom**: Use a custom color of your choice for the status bar when running Flutter
+
+You can configure this in your settings under "Flutter Rapid Runner: Terminal Color Behavior".
+
 ## Known Issues
 
 None at this time. Please report any issues on the [GitHub repository](https://github.com/ClasherCr/flutter-rapid-runner/issues).
@@ -70,6 +80,9 @@ None at this time. Please report any issues on the [GitHub repository](https://g
 ## About the Author
 
 Created by Jashkumar Bakul Solanki - a Flutter developer passionate about improving the development experience.
+
+## Attribution
+This extension was created by Jashkumar Bakul Solanki. If you modify or build upon this work, please provide appropriate credit.
 
 ## License
 

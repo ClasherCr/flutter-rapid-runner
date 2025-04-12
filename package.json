@@ -37,7 +37,7 @@
   "main": "./out/extension.js",
   "contributes": {
     "configuration": {
-      "title": "Flutter Runner",
+      "title": "Flutter Rapid Runner",
       "properties": {
         "flutterRunner.runIn": {
           "type": "string",
@@ -58,6 +58,22 @@
           ],
           "default": "run",
           "description": "Mode to run the Flutter app"
+        },
+        "flutterRapidRunner.disableTerminalHighlighting": {
+          "type": "boolean",
+          "default": true,
+          "description": "Disable the terminal highlight effect (orange status bar) when running Flutter apps"
+        },
+        "flutterRapidRunner.terminalColorBehavior": {
+          "type": "string",
+          "enum": ["default", "preserve", "custom"],
+          "default": "preserve",
+          "description": "Control how terminal affects status bar color: 'default' (VS Code's orange), 'preserve' (keep current), or 'custom' (set custom color)"
+        },
+        "flutterRapidRunner.customTerminalColor": {
+          "type": "string",
+          "default": "#007ACC",
+          "description": "Custom status bar color to use when terminal is focused (only used when terminalColorBehavior is 'custom')"
         }
       }
     },
