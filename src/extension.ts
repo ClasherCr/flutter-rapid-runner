@@ -1,62 +1,91 @@
 import * as vscode from "vscode";
+import * as path from "path";
+import * as fs from "fs";
+
+interface FlutterDevice {
+  id: string;
+  name: string;
+  platform: string;
+  isEmulator: boolean;
+}
+
+interface RunOptions {
+  mode: "run" | "debug" | "profile" | "release";
+  device?: string;
+  flavor?: string;
+  target?: string;
+}
 
 let terminal: vscode.Terminal | undefined;
 let terminalFocusDisposable: vscode.Disposable | undefined;
 let statusBarColorResetTimeout: NodeJS.Timeout | undefined;
 let originalStatusBarColor: string | undefined;
+let statusBarItem: vscode.StatusBarItem | undefined;
+let currentRunningProcess: boolean = false;
 
 export function activate(context: vscode.ExtensionContext) {
   console.log("Flutter Rapid Runner is now active!");
 
-  // Register the commands
+  statusBarItem = vscode.window.createStatusBarItem(
+    vscode.StatusBarAlignment.Left,
+    100
+  );
+  statusBarItem.text = "$(play) Flutter";
+  statusBarItem.tooltip = "Click to run Flutter app";
+  statusBarItem.command = "flutter-rapid-runner.runWithOptions";
+  statusBarItem.show();
+  context.subscriptions.push(statusBarItem);
+
   context.subscriptions.push(
     vscode.commands.registerCommand(
       "flutter-rapid-runner.runWithOptions",
       async () => {
-        const options = [
-          { label: "Run", description: "Run without debugging" },
-          { label: "Debug", description: "Run with debugging" },
-        ];
-
-        const selectedOption = await vscode.window.showQuickPick(options, {
-          placeHolder: "Select run mode",
-        });
-
-        if (selectedOption) {
-          if (selectedOption.label === "Debug") {
-            runFlutterApp(true);
-          } else {
-            runFlutterApp(false);
-          }
-        }
+        await showRunOptionsQuickPick();
       }
     ),
 
-    vscode.commands.registerCommand("flutter-rapid-runner.run", () => {
-      runFlutterApp(false);
+    vscode.commands.registerCommand("flutter-rapid-runner.run", async () => {
+      await runFlutterApp({ mode: "run" });
     }),
 
-    vscode.commands.registerCommand("flutter-rapid-runner.debug", () => {
-      runFlutterApp(true);
+    vscode.commands.registerCommand("flutter-rapid-runner.debug", async () => {
+      await runFlutterApp({ mode: "debug" });
     }),
+
+    vscode.commands.registerCommand(
+      "flutter-rapid-runner.profile",
+      async () => {
+        await runFlutterApp({ mode: "profile" });
+      }
+    ),
+
+    vscode.commands.registerCommand(
+      "flutter-rapid-runner.release",
+      async () => {
+        await runFlutterApp({ mode: "release" });
+      }
+    ),
 
     vscode.commands.registerCommand("flutter-rapid-runner.stop", () => {
       stopFlutterApp();
     }),
 
-    // Register the toggle command
+    vscode.commands.registerCommand(
+      "flutter-rapid-runner.selectDevice",
+      async () => {
+        await selectDevice();
+      }
+    ),
+
     vscode.commands.registerCommand(
       "flutter-rapid-runner.toggleRunLocation",
       () => {
-        // Get current config
         const config = vscode.workspace.getConfiguration("flutterRunner");
         const currentRunIn = config.get<string>("runIn", "terminal");
 
-        // Toggle between terminal and debugConsole
         const newRunIn =
           currentRunIn === "terminal" ? "debugConsole" : "terminal";
 
-        // Update config
         config
           .update("runIn", newRunIn, vscode.ConfigurationTarget.Global)
           .then(() => {
@@ -67,7 +96,6 @@ export function activate(context: vscode.ExtensionContext) {
       }
     ),
 
-    // Cleanup when extension is deactivated
     {
       dispose: () => {
         if (terminal) {
@@ -77,127 +105,253 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
-  // Set initial state for menu visibility
   vscode.commands.executeCommand(
     "setContext",
     "flutterRunnerExtension.isRunning",
     false
   );
 
-  // Add a listener for VS Code's debug sessions
   context.subscriptions.push(
     vscode.debug.onDidStartDebugSession((session) => {
-      // Check if this is a Dart/Flutter debug session
       if (
         session.type === "dart" ||
         session.configuration.name?.includes("Flutter")
       ) {
-        // Update our UI to show the stop button
-        vscode.commands.executeCommand(
-          "setContext",
-          "flutterRunnerExtension.isRunning",
-          true
-        );
+        currentRunningProcess = true;
+        updateRunningState(true);
       }
     }),
 
     vscode.debug.onDidTerminateDebugSession((session) => {
-      // Check if this is a Dart/Flutter debug session
       if (
         session.type === "dart" ||
         session.configuration.name?.includes("Flutter")
       ) {
-        // Update our UI to hide the stop button
-        vscode.commands.executeCommand(
-          "setContext",
-          "flutterRunnerExtension.isRunning",
-          false
-        );
+        currentRunningProcess = false;
+        updateRunningState(false);
       }
     })
   );
 
-  // Also listen for terminal closed events
   context.subscriptions.push(
     vscode.window.onDidCloseTerminal((closedTerminal) => {
-      // Check if this terminal had "Flutter" in its name
       if (closedTerminal.name.includes("Flutter")) {
-        vscode.commands.executeCommand(
-          "setContext",
-          "flutterRunnerExtension.isRunning",
-          false
-        );
+        currentRunningProcess = false;
+        updateRunningState(false);
       }
     })
   );
 
-  // Set up terminal color handling
   const terminalColorDisposable = setupTerminalColorHandling(context);
   if (terminalColorDisposable) {
     context.subscriptions.push(terminalColorDisposable);
   }
+
+  updateWorkspaceContext();
 }
 
-function runFlutterApp(withDebug: boolean) {
-  // Get user preference for terminal highlighting first
+async function showRunOptionsQuickPick() {
+  const options = [
+    {
+      label: "$(play-circle) Run",
+      description: "Start Flutter app without debugging",
+      detail: "Launches your Flutter app in run mode with hot reload support",
+      mode: "run" as const,
+    },
+    {
+      label: "$(bug) Debug",
+      description: "Start Flutter app with debugging enabled",
+      detail:
+        "Launches your Flutter app with debugging capabilities and breakpoint support",
+      mode: "debug" as const,
+    },
+    {
+      label: "$(dashboard) Profile",
+      description: "Start Flutter app in profile mode",
+      detail:
+        "Launches your Flutter app for performance profiling and analysis",
+      mode: "profile" as const,
+    },
+    {
+      label: "$(package) Release",
+      description: "Start Flutter app in release mode",
+      detail: "Launches your Flutter app optimized for production deployment",
+      mode: "release" as const,
+    },
+  ];
+
+  const selectedOption = await vscode.window.showQuickPick(options, {
+    placeHolder: "🚀 Select Flutter run mode",
+    matchOnDescription: true,
+    matchOnDetail: true,
+    ignoreFocusOut: false,
+  });
+
+  if (selectedOption) {
+    const devices = await getFlutterDevices();
+    if (devices.length > 1) {
+      const deviceOption = await selectDeviceFromList(devices);
+      if (deviceOption) {
+        await runFlutterApp({
+          mode: selectedOption.mode,
+          device: deviceOption.id,
+        });
+      }
+    } else {
+      await runFlutterApp({ mode: selectedOption.mode });
+    }
+  }
+}
+
+async function selectDevice() {
+  const devices = await getFlutterDevices();
+  if (devices.length === 0) {
+    vscode.window.showErrorMessage(
+      "❌ No Flutter devices found. Please connect a device or start an emulator."
+    );
+    return;
+  }
+
+  const deviceOption = await selectDeviceFromList(devices);
+  if (deviceOption) {
+    vscode.window.showInformationMessage(
+      `✅ Selected device: ${deviceOption.name}`
+    );
+  }
+}
+
+async function selectDeviceFromList(
+  devices: FlutterDevice[]
+): Promise<FlutterDevice | undefined> {
+  const deviceOptions = devices.map((device) => {
+    let deviceIcon = "$(device-mobile)";
+    if (device.platform.toLowerCase().includes("ios")) {
+      deviceIcon = "$(device-mobile)";
+    } else if (device.platform.toLowerCase().includes("android")) {
+      deviceIcon = "$(device-mobile)";
+    } else if (device.platform.toLowerCase().includes("web")) {
+      deviceIcon = "$(globe)";
+    } else if (device.platform.toLowerCase().includes("windows")) {
+      deviceIcon = "$(window)";
+    } else if (device.platform.toLowerCase().includes("macos")) {
+      deviceIcon = "$(device-desktop)";
+    } else if (device.platform.toLowerCase().includes("linux")) {
+      deviceIcon = "$(terminal-linux)";
+    }
+
+    return {
+      label: `${deviceIcon} ${device.name}`,
+      description: `${device.platform} • ${
+        device.isEmulator ? "Emulator" : "Physical Device"
+      }`,
+      detail: `Device ID: ${device.id}`,
+      device: device,
+    };
+  });
+
+  const selectedDevice = await vscode.window.showQuickPick(deviceOptions, {
+    placeHolder: "📱 Select target device for Flutter app",
+    matchOnDescription: true,
+    matchOnDetail: true,
+    ignoreFocusOut: false,
+  });
+
+  return selectedDevice?.device;
+}
+
+function updateWorkspaceContext() {
+  const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+  if (workspaceFolder) {
+    const pubspecPath = path.join(workspaceFolder.uri.fsPath, "pubspec.yaml");
+    const hasFlutterProject = fs.existsSync(pubspecPath);
+    vscode.commands.executeCommand(
+      "setContext",
+      "workspaceHasFlutterProject",
+      hasFlutterProject
+    );
+  }
+}
+
+async function executeCommand(
+  command: string
+): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const { exec } = require("child_process");
+    exec(command, (error: any, stdout: string, stderr: string) => {
+      if (error) {
+        reject(error);
+      } else {
+        resolve({ stdout, stderr });
+      }
+    });
+  });
+}
+
+async function runFlutterApp(options: RunOptions) {
+  if (!isFlutterProject()) {
+    vscode.window.showErrorMessage(
+      "❌ This doesn't appear to be a Flutter project. Please open a Flutter project directory."
+    );
+    return;
+  }
+
+  const flutterAvailable = await isFlutterAvailable();
+  if (!flutterAvailable) {
+    vscode.window.showErrorMessage(
+      "❌ Flutter is not installed or not in your system PATH. Please install Flutter and ensure it's accessible from the command line."
+    );
+    return;
+  }
+
   const config = vscode.workspace.getConfiguration("flutterRapidRunner");
   const disableHighlighting = config.get<boolean>(
     "disableTerminalHighlighting",
     false
   );
 
-  if (withDebug) {
-    // Get workspace folder path
+  if (options.mode === "debug") {
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
     if (!workspaceFolder) {
       vscode.window.showErrorMessage(
-        "No workspace folder found. Please open a Flutter project."
+        "❌ No workspace folder found. Please open a Flutter project."
       );
       return;
     }
 
-    // Verify this is a Flutter project
-    try {
-      const flutterProjectPath = workspaceFolder.uri.fsPath;
+    const debugConfig: any = {
+      name: "Flutter",
+      request: "launch",
+      type: "dart",
+      program: options.target || "lib/main.dart",
+    };
 
-      // Launch debugging using Dart extension
-      vscode.debug.startDebugging(
-        vscode.workspace.getWorkspaceFolder(
-          vscode.Uri.file(flutterProjectPath)
-        ),
-        {
-          name: "Flutter",
-          request: "launch",
-          type: "dart",
-          program: "lib/main.dart",
-        }
-      );
-
-      // Set context
-      vscode.commands.executeCommand(
-        "setContext",
-        "flutterRunnerExtension.isRunning",
-        true
-      );
-    } catch (error) {
-      vscode.window.showErrorMessage(`Failed to start debug session: ${error}`);
+    if (options.device) {
+      debugConfig.deviceId = options.device;
     }
+
+    if (options.flavor) {
+      debugConfig.args = ["--flavor", options.flavor];
+    }
+
+    vscode.debug.startDebugging(
+      vscode.workspace.getWorkspaceFolder(
+        vscode.Uri.file(workspaceFolder.uri.fsPath)
+      ),
+      debugConfig
+    );
+
+    updateRunningState(true);
     return;
   }
 
-  // If not in debug mode (the rest of your existing code)
   if (!terminal) {
     terminal = vscode.window.createTerminal("Flutter Run");
   }
 
   terminal.show();
 
-  // Properly handle the status bar color based on user preference
   if (disableHighlighting) {
-    // Save original status bar color before modifying it
     saveOriginalStatusBarColor();
-
-    // Disable the status bar color change when terminal is focused
     const debugConfig = vscode.workspace.getConfiguration("debug");
     debugConfig.update(
       "enableStatusBarColor",
@@ -206,43 +360,53 @@ function runFlutterApp(withDebug: boolean) {
     );
   }
 
-  // Get workspace folder path
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
   if (!workspaceFolder) {
     vscode.window.showErrorMessage(
-      "No workspace folder found. Please open a Flutter project."
+      "❌ No workspace folder found. Please open a Flutter project."
     );
     return;
   }
 
-  // Run flutter command
-  terminal.sendText("cd " + workspaceFolder.uri.fsPath);
-  terminal.sendText("flutter run -t lib/main.dart");
+  let flutterCommand = `flutter run`;
 
-  // Set context
-  vscode.commands.executeCommand(
-    "setContext",
-    "flutterRunnerExtension.isRunning",
-    true
-  );
+  if (options.mode === "profile") {
+    flutterCommand += " --profile";
+  } else if (options.mode === "release") {
+    flutterCommand += " --release";
+  }
 
-  // Watch for terminal close to reset state
+  if (options.target) {
+    flutterCommand += ` -t ${options.target}`;
+  } else {
+    flutterCommand += ` -t lib/main.dart`;
+  }
+
+  if (options.device) {
+    flutterCommand += ` -d ${options.device}`;
+  }
+
+  if (options.flavor) {
+    flutterCommand += ` --flavor ${options.flavor}`;
+  }
+
+  terminal.sendText(`cd "${workspaceFolder.uri.fsPath}"`);
+  terminal.sendText(flutterCommand);
+
+  updateRunningState(true);
+  currentRunningProcess = true;
+
   if (terminalFocusDisposable) {
     terminalFocusDisposable.dispose();
   }
 
-  // Listen for terminal close events
   terminalFocusDisposable = vscode.window.onDidCloseTerminal(
     (closedTerminal) => {
       if (closedTerminal === terminal) {
         terminal = undefined;
-        vscode.commands.executeCommand(
-          "setContext",
-          "flutterRunnerExtension.isRunning",
-          false
-        );
+        currentRunningProcess = false;
+        updateRunningState(false);
 
-        // Also clean up the disposable
         if (terminalFocusDisposable) {
           terminalFocusDisposable.dispose();
           terminalFocusDisposable = undefined;
@@ -252,57 +416,95 @@ function runFlutterApp(withDebug: boolean) {
   );
 }
 
+function isFlutterProject(): boolean {
+  const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+  if (!workspaceFolder) {
+    return false;
+  }
+
+  const pubspecPath = path.join(workspaceFolder.uri.fsPath, "pubspec.yaml");
+  if (!fs.existsSync(pubspecPath)) {
+    return false;
+  }
+
+  try {
+    const pubspecContent = fs.readFileSync(pubspecPath, "utf8");
+    return (
+      pubspecContent.includes("flutter:") ||
+      pubspecContent.includes("flutter_test:")
+    );
+  } catch (error) {
+    return false;
+  }
+}
+
+function updateRunningState(isRunning: boolean) {
+  vscode.commands.executeCommand(
+    "setContext",
+    "flutterRunnerExtension.isRunning",
+    isRunning
+  );
+
+  if (statusBarItem) {
+    if (isRunning) {
+      statusBarItem.text = "$(debug-stop) Flutter";
+      statusBarItem.tooltip = "Click to stop Flutter app";
+      statusBarItem.command = "flutter-rapid-runner.stop";
+    } else {
+      statusBarItem.text = "$(play) Flutter";
+      statusBarItem.tooltip = "Click to run Flutter app";
+      statusBarItem.command = "flutter-rapid-runner.runWithOptions";
+    }
+  }
+}
+
 function stopFlutterApp() {
   if (terminal) {
-    // Get user's preference before disposing terminal
     const config = vscode.workspace.getConfiguration("flutterRapidRunner");
     const colorBehavior = config.get<string>(
       "terminalColorBehavior",
       "default"
     );
 
-    // If we were preserving or using custom color, restore original color
     if (colorBehavior !== "default") {
       restoreOriginalStatusBarColor();
     }
 
     terminal.sendText("q", false);
-    terminal.dispose();
-    terminal = undefined;
+
+    setTimeout(() => {
+      if (terminal) {
+        terminal.dispose();
+        terminal = undefined;
+      }
+    }, 1000);
   }
 
-  // Clean up focus listener
   if (terminalFocusDisposable) {
     terminalFocusDisposable.dispose();
     terminalFocusDisposable = undefined;
   }
 
-  // Clean up any pending timeout
   if (statusBarColorResetTimeout) {
     clearTimeout(statusBarColorResetTimeout);
     statusBarColorResetTimeout = undefined;
   }
 
-  // Also try to stop any debug sessions
   vscode.commands.executeCommand("workbench.action.debug.stop");
 
-  // Set context
-  vscode.commands.executeCommand(
-    "setContext",
-    "flutterRunnerExtension.isRunning",
-    false
-  );
+  currentRunningProcess = false;
+  updateRunningState(false);
+
+  vscode.window.showInformationMessage("✅ Flutter app stopped.");
 }
 
 function setupTerminalColorHandling(context: vscode.ExtensionContext) {
-  // Get user's preferences
   const config = vscode.workspace.getConfiguration("flutterRapidRunner");
   const disableHighlighting = config.get<boolean>(
     "disableTerminalHighlighting",
     false
   );
 
-  // If highlighting is disabled, ensure status bar color doesn't change
   if (disableHighlighting) {
     const debugConfig = vscode.workspace.getConfiguration("debug");
     debugConfig.update(
@@ -313,34 +515,28 @@ function setupTerminalColorHandling(context: vscode.ExtensionContext) {
     return;
   }
 
-  // Otherwise proceed with normal color behavior handling
   const colorBehavior = config.get<string>("terminalColorBehavior", "preserve");
 
-  // Store original debug.enableStatusBarColor value
   const debugConfig = vscode.workspace.getConfiguration("debug");
   const originalEnableStatusBarColor = debugConfig.get<boolean>(
     "enableStatusBarColor",
     true
   );
 
-  // Store it in extension context state
   context.workspaceState.update(
     "originalEnableStatusBarColor",
     originalEnableStatusBarColor
   );
 
-  // Listen for terminal focus changes
   const disposable = vscode.window.onDidChangeActiveTerminal(
     async (activeTerm) => {
       if (activeTerm === terminal) {
-        // When our Flutter terminal gets focus, disable the status bar color
         await debugConfig.update(
           "enableStatusBarColor",
           false,
           vscode.ConfigurationTarget.Workspace
         );
 
-        // If custom color is desired, set it
         if (colorBehavior === "custom") {
           const customColor = config.get<string>(
             "customTerminalColor",
@@ -349,7 +545,6 @@ function setupTerminalColorHandling(context: vscode.ExtensionContext) {
           setStatusBarColor(customColor);
         }
       } else if (terminal && activeTerm !== terminal) {
-        // When focus moves to a different terminal, restore the original setting
         const originalValue = context.workspaceState.get<boolean>(
           "originalEnableStatusBarColor",
           true
@@ -360,7 +555,6 @@ function setupTerminalColorHandling(context: vscode.ExtensionContext) {
           vscode.ConfigurationTarget.Workspace
         );
 
-        // If we had set a custom color, restore original
         if (colorBehavior === "custom") {
           restoreOriginalStatusBarColor();
         }
@@ -368,14 +562,11 @@ function setupTerminalColorHandling(context: vscode.ExtensionContext) {
     }
   );
 
-  // Store the disposable so we can clean it up later
   context.subscriptions.push(disposable);
 
-  // Return the disposable for additional cleanup if needed
   return disposable;
 }
 
-// Helper function to save the original status bar color
 function saveOriginalStatusBarColor() {
   const workbenchConfig = vscode.workspace.getConfiguration("workbench");
   const colorCustomizations =
@@ -384,7 +575,6 @@ function saveOriginalStatusBarColor() {
   originalStatusBarColor = colorCustomizations["statusBar.background"];
 }
 
-// Helper function to restore the original status bar color
 function restoreOriginalStatusBarColor() {
   const workbenchConfig = vscode.workspace.getConfiguration("workbench");
   const colorCustomizations =
@@ -404,7 +594,6 @@ function restoreOriginalStatusBarColor() {
   );
 }
 
-// Helper function to set a specific status bar color
 function setStatusBarColor(color: string) {
   const workbenchConfig = vscode.workspace.getConfiguration("workbench");
   const colorCustomizations =
@@ -419,30 +608,51 @@ function setStatusBarColor(color: string) {
   );
 }
 
-export function deactivate() {
-  // Clean up terminal
-  if (terminal) {
-    terminal.dispose();
+async function isFlutterAvailable(): Promise<boolean> {
+  try {
+    await executeCommand("flutter --version");
+    return true;
+  } catch (error) {
+    return false;
   }
+}
 
-  // Clean up focus listener
-  if (terminalFocusDisposable) {
-    terminalFocusDisposable.dispose();
+async function getFlutterDevices(): Promise<FlutterDevice[]> {
+  try {
+    const flutterAvailable = await isFlutterAvailable();
+    if (!flutterAvailable) {
+      vscode.window.showErrorMessage(
+        "❌ Flutter is not installed or not in your system PATH. Please install Flutter and ensure it's accessible from the command line."
+      );
+      return [];
+    }
+
+    const { stdout } = await executeCommand("flutter devices");
+    const devices: FlutterDevice[] = [];
+    const lines = stdout.split("\n");
+
+    for (const line of lines) {
+      if (line.includes("•") && !line.includes("connected device")) {
+        const parts = line.split("•").map((p) => p.trim());
+        if (parts.length >= 3) {
+          const name = parts[0];
+          const id = parts[1];
+          const platform = parts[2];
+          const isEmulator = parts.length > 3 && parts[3].includes("emulator");
+
+          devices.push({
+            id,
+            name,
+            platform,
+            isEmulator,
+          });
+        }
+      }
+    }
+
+    return devices;
+  } catch (error) {
+    console.error("Error retrieving Flutter devices:", error);
+    return [];
   }
-
-  // Clean up any pending timeout
-  if (statusBarColorResetTimeout) {
-    clearTimeout(statusBarColorResetTimeout);
-  }
-
-  // Restore original status bar color
-  restoreOriginalStatusBarColor();
-
-  // Restore original enableStatusBarColor setting
-  const debugConfig = vscode.workspace.getConfiguration("debug");
-  debugConfig.update(
-    "enableStatusBarColor",
-    true,
-    vscode.ConfigurationTarget.Workspace
-  );
 }

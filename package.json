@@ -2,7 +2,7 @@
   "name": "flutter-rapid-runner",
   "displayName": "Flutter Rapid Runner",
   "description": "VS Code extension that mimics Android Studio toolbar for Flutter",
-  "version": "0.1.3",
+  "version": "0.2.1",
   "publisher": "jashkumarsolanki",
   "author": {
     "name": "Jashkumar Bakul Solanki",
@@ -31,7 +31,10 @@
     "onCommand:flutter-rapid-runner.runWithOptions",
     "onCommand:flutter-rapid-runner.run",
     "onCommand:flutter-rapid-runner.debug",
+    "onCommand:flutter-rapid-runner.profile",
+    "onCommand:flutter-rapid-runner.release",
     "onCommand:flutter-rapid-runner.stop",
+    "onCommand:flutter-rapid-runner.selectDevice",
     "onStartupFinished"
   ],
   "main": "./out/extension.js",
@@ -66,7 +69,11 @@
         },
         "flutterRapidRunner.terminalColorBehavior": {
           "type": "string",
-          "enum": ["default", "preserve", "custom"],
+          "enum": [
+            "default",
+            "preserve",
+            "custom"
+          ],
           "default": "preserve",
           "description": "Control how terminal affects status bar color: 'default' (VS Code's orange), 'preserve' (keep current), or 'custom' (set custom color)"
         },
@@ -74,6 +81,16 @@
           "type": "string",
           "default": "#007ACC",
           "description": "Custom status bar color to use when terminal is focused (only used when terminalColorBehavior is 'custom')"
+        },
+        "flutterRapidRunner.defaultDevice": {
+          "type": "string",
+          "default": "",
+          "description": "Default device ID to use when running Flutter apps"
+        },
+        "flutterRapidRunner.showDeviceSelector": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show device selector when multiple devices are available"
         }
       }
     },
@@ -91,7 +108,22 @@
       {
         "command": "flutter-rapid-runner.debug",
         "title": "Flutter: Debug",
-        "icon": "$(zap)"
+        "icon": "$(bug)"
+      },
+      {
+        "command": "flutter-rapid-runner.profile",
+        "title": "Flutter: Profile",
+        "icon": "$(dashboard)"
+      },
+      {
+        "command": "flutter-rapid-runner.release",
+        "title": "Flutter: Release",
+        "icon": "$(package)"
+      },
+      {
+        "command": "flutter-rapid-runner.selectDevice",
+        "title": "Flutter: Select Device",
+        "icon": "$(device-mobile)"
       },
       {
         "command": "flutter-rapid-runner.stop",
@@ -107,12 +139,12 @@
       "editor/title": [
         {
           "command": "flutter-rapid-runner.runWithOptions",
-          "group": "navigation",
+          "group": "navigation@1",
           "when": "resourceExtname == .dart && !flutterRunnerExtension.isRunning"
         },
         {
           "command": "flutter-rapid-runner.stop",
-          "group": "navigation",
+          "group": "navigation@2",
           "when": "resourceExtname == .dart && flutterRunnerExtension.isRunning"
         }
       ],
@@ -120,9 +152,30 @@
         {
           "command": "flutter-rapid-runner.toggleRunLocation",
           "when": "workspaceHasFlutterProject"
+        },
+        {
+          "command": "flutter-rapid-runner.selectDevice",
+          "when": "workspaceHasFlutterProject"
         }
       ]
-    }
+    },
+    "keybindings": [
+      {
+        "command": "flutter-rapid-runner.runWithOptions",
+        "key": "ctrl+f5",
+        "when": "workspaceHasFlutterProject"
+      },
+      {
+        "command": "flutter-rapid-runner.debug",
+        "key": "f5",
+        "when": "workspaceHasFlutterProject"
+      },
+      {
+        "command": "flutter-rapid-runner.stop",
+        "key": "shift+f5",
+        "when": "workspaceHasFlutterProject && flutterRunnerExtension.isRunning"
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
